@@ -1,0 +1,526 @@
+const { connection } = require("../db");
+
+connection.exec(`
+CREATE TABLE IF NOT EXISTS management_users (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  added_by TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS godmode_users (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  added_by TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS staff_access (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  tier TEXT NOT NULL,
+  added_by TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS antinuke_admins (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  added_by TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS vc_ranks (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  rank_key TEXT NOT NULL,
+  set_by TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_logs (
+  guild_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  PRIMARY KEY (guild_id, category)
+);
+
+CREATE TABLE IF NOT EXISTS log_settings (
+  guild_id TEXT PRIMARY KEY,
+  antinuke_ping_role_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS voice_guards (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  godmode INTEGER NOT NULL DEFAULT 0,
+  shield INTEGER NOT NULL DEFAULT 0,
+  stfu INTEGER NOT NULL DEFAULT 0,
+  last_channel_id TEXT,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS voice_follows (
+  guild_id TEXT NOT NULL,
+  follower_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  PRIMARY KEY (guild_id, follower_id)
+);
+
+CREATE TABLE IF NOT EXISTS voice_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_history_guild
+  ON voice_history(guild_id, id);
+
+CREATE TABLE IF NOT EXISTS vc_call_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vc_call_history_channel
+  ON vc_call_history(guild_id, channel_id, id);
+
+CREATE TABLE IF NOT EXISTS lockdown_channels (
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  PRIMARY KEY (guild_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS voice_rank_roles (
+  guild_id TEXT PRIMARY KEY,
+  plus_role_id TEXT,
+  premium_role_id TEXT,
+  premium_plus_role_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS text_lock_snapshots (
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  send_messages TEXT NOT NULL,
+  PRIMARY KEY (guild_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS command_grants (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  command TEXT NOT NULL,
+  granted_by TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id, command)
+);
+
+CREATE TABLE IF NOT EXISTS voice_shields (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  added_by TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS breakthru_roles (
+  guild_id TEXT PRIMARY KEY,
+  role_id TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pic_roles (
+  guild_id TEXT PRIMARY KEY,
+  role_id TEXT NOT NULL
+);
+`);
+
+function key(value) {
+  return value == null ? null : String(value);
+}
+
+const statements = {
+  addManagement: connection.prepare("INSERT OR IGNORE INTO management_users(guild_id, user_id, added_by, created_at) VALUES(?,?,?,?)"),
+  removeManagement: connection.prepare("DELETE FROM management_users WHERE guild_id=? AND user_id=?"),
+  isManagement: connection.prepare("SELECT 1 FROM management_users WHERE guild_id=? AND user_id=?"),
+  listManagement: connection.prepare("SELECT * FROM management_users WHERE guild_id=? ORDER BY created_at ASC"),
+  addGodmode: connection.prepare(`
+    INSERT INTO godmode_users(guild_id, user_id, added_by, created_at) VALUES(?,?,?,?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET added_by=excluded.added_by, created_at=excluded.created_at
+  `),
+  removeGodmode: connection.prepare("DELETE FROM godmode_users WHERE guild_id=? AND user_id=?"),
+  isGodmode: connection.prepare("SELECT 1 FROM godmode_users WHERE guild_id=? AND user_id=?"),
+  getGodmode: connection.prepare("SELECT * FROM godmode_users WHERE guild_id=? AND user_id=?"),
+  setStaff: connection.prepare(`
+    INSERT INTO staff_access(guild_id, user_id, tier, added_by, created_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET tier=excluded.tier, added_by=excluded.added_by, created_at=excluded.created_at
+  `),
+  clearStaff: connection.prepare("DELETE FROM staff_access WHERE guild_id=? AND user_id=?"),
+  getStaff: connection.prepare("SELECT * FROM staff_access WHERE guild_id=? AND user_id=?"),
+  listStaff: connection.prepare("SELECT * FROM staff_access WHERE guild_id=? AND tier=? ORDER BY created_at ASC"),
+  addAntinuke: connection.prepare("INSERT OR IGNORE INTO antinuke_admins(guild_id, user_id, added_by, created_at) VALUES(?,?,?,?)"),
+  removeAntinuke: connection.prepare("DELETE FROM antinuke_admins WHERE guild_id=? AND user_id=?"),
+  isAntinuke: connection.prepare("SELECT 1 FROM antinuke_admins WHERE guild_id=? AND user_id=?"),
+  listAntinuke: connection.prepare("SELECT * FROM antinuke_admins WHERE guild_id=? ORDER BY created_at ASC"),
+  setRank: connection.prepare(`
+    INSERT INTO vc_ranks(guild_id, user_id, rank_key, set_by, created_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET rank_key=excluded.rank_key, set_by=excluded.set_by, created_at=excluded.created_at
+  `),
+  clearRank: connection.prepare("DELETE FROM vc_ranks WHERE guild_id=? AND user_id=?"),
+  getRank: connection.prepare("SELECT * FROM vc_ranks WHERE guild_id=? AND user_id=?"),
+  listRanks: connection.prepare("SELECT * FROM vc_ranks WHERE guild_id=? ORDER BY created_at ASC"),
+  setLog: connection.prepare(`
+    INSERT INTO event_logs(guild_id, category, channel_id) VALUES(?,?,?)
+    ON CONFLICT(guild_id, category) DO UPDATE SET channel_id=excluded.channel_id
+  `),
+  removeLog: connection.prepare("DELETE FROM event_logs WHERE guild_id=? AND category=?"),
+  clearLogs: connection.prepare("DELETE FROM event_logs WHERE guild_id=?"),
+  getLog: connection.prepare("SELECT channel_id FROM event_logs WHERE guild_id=? AND category=?"),
+  listLogs: connection.prepare("SELECT category, channel_id FROM event_logs WHERE guild_id=? ORDER BY category"),
+  getPing: connection.prepare("SELECT antinuke_ping_role_id FROM log_settings WHERE guild_id=?"),
+  setPing: connection.prepare(`
+    INSERT INTO log_settings(guild_id, antinuke_ping_role_id) VALUES(?,?)
+    ON CONFLICT(guild_id) DO UPDATE SET antinuke_ping_role_id=excluded.antinuke_ping_role_id
+  `),
+  getGuard: connection.prepare("SELECT * FROM voice_guards WHERE guild_id=? AND user_id=?"),
+  ensureGuard: connection.prepare("INSERT OR IGNORE INTO voice_guards(guild_id, user_id) VALUES(?,?)"),
+  setGuardFlag: connection.prepare("UPDATE voice_guards SET godmode=?, shield=?, stfu=?, last_channel_id=? WHERE guild_id=? AND user_id=?"),
+  listGuards: connection.prepare("SELECT * FROM voice_guards WHERE guild_id=? AND (godmode=1 OR shield=1 OR stfu=1)"),
+  setFollow: connection.prepare(`
+    INSERT INTO voice_follows(guild_id, follower_id, target_id) VALUES(?,?,?)
+    ON CONFLICT(guild_id, follower_id) DO UPDATE SET target_id=excluded.target_id
+  `),
+  clearFollow: connection.prepare("DELETE FROM voice_follows WHERE guild_id=? AND follower_id=?"),
+  followsOf: connection.prepare("SELECT follower_id FROM voice_follows WHERE guild_id=? AND target_id=?"),
+  getFollow: connection.prepare("SELECT target_id FROM voice_follows WHERE guild_id=? AND follower_id=?"),
+  addHistory: connection.prepare("INSERT INTO voice_history(guild_id, user_id, summary, created_at) VALUES(?,?,?,?)"),
+  listHistory: connection.prepare("SELECT * FROM voice_history WHERE guild_id=? ORDER BY id DESC LIMIT ?"),
+  listHistoryFor: connection.prepare("SELECT * FROM voice_history WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?"),
+  addCallEvent: connection.prepare("INSERT INTO vc_call_history(guild_id, channel_id, user_id, action, created_at) VALUES(?,?,?,?,?)"),
+  callHistoryExists: connection.prepare("SELECT 1 AS present FROM vc_call_history LIMIT 1"),
+  savedVoiceHistory: connection.prepare("SELECT guild_id, user_id, summary, created_at FROM voice_history ORDER BY id ASC"),
+  listCallHistory: connection.prepare(`
+    SELECT * FROM (
+      SELECT * FROM vc_call_history WHERE guild_id=? AND channel_id=? ORDER BY id DESC LIMIT ?
+    ) ORDER BY id ASC
+  `),
+  trimCallHistory: connection.prepare(`
+    DELETE FROM vc_call_history WHERE guild_id=? AND channel_id=? AND id NOT IN (
+      SELECT id FROM vc_call_history WHERE guild_id=? AND channel_id=? ORDER BY id DESC LIMIT 400
+    )
+  `),
+  trimHistory: connection.prepare(`
+    DELETE FROM voice_history WHERE guild_id=? AND id NOT IN (
+      SELECT id FROM voice_history WHERE guild_id=? ORDER BY id DESC LIMIT 50
+    )
+  `),
+  addLockdown: connection.prepare("INSERT OR REPLACE INTO lockdown_channels(guild_id, channel_id, kind) VALUES(?,?,?)"),
+  listLockdown: connection.prepare("SELECT * FROM lockdown_channels WHERE guild_id=?"),
+  clearLockdown: connection.prepare("DELETE FROM lockdown_channels WHERE guild_id=?"),
+  ensureVoiceRoles: connection.prepare("INSERT OR IGNORE INTO voice_rank_roles(guild_id) VALUES(?)"),
+  getVoiceRoles: connection.prepare("SELECT * FROM voice_rank_roles WHERE guild_id=?"),
+  setPlusRole: connection.prepare("UPDATE voice_rank_roles SET plus_role_id=? WHERE guild_id=?"),
+  setPremiumRole: connection.prepare("UPDATE voice_rank_roles SET premium_role_id=? WHERE guild_id=?"),
+  setPremiumPlusRole: connection.prepare("UPDATE voice_rank_roles SET premium_plus_role_id=? WHERE guild_id=?"),
+  saveTextLock: connection.prepare("INSERT OR IGNORE INTO text_lock_snapshots(guild_id, channel_id, send_messages) VALUES(?,?,?)"),
+  getTextLock: connection.prepare("SELECT send_messages FROM text_lock_snapshots WHERE guild_id=? AND channel_id=?"),
+  listTextLocks: connection.prepare("SELECT channel_id, send_messages FROM text_lock_snapshots WHERE guild_id=?"),
+  clearTextLock: connection.prepare("DELETE FROM text_lock_snapshots WHERE guild_id=? AND channel_id=?"),
+  clearTextLocks: connection.prepare("DELETE FROM text_lock_snapshots WHERE guild_id=?"),
+  grantCommand: connection.prepare(`
+    INSERT INTO command_grants(guild_id, user_id, command, granted_by, created_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(guild_id, user_id, command) DO UPDATE SET granted_by=excluded.granted_by, created_at=excluded.created_at
+  `),
+  revokeCommand: connection.prepare("DELETE FROM command_grants WHERE guild_id=? AND user_id=? AND command=?"),
+  hasCommandGrant: connection.prepare("SELECT 1 FROM command_grants WHERE guild_id=? AND user_id=? AND command=?"),
+  listCommandGrants: connection.prepare("SELECT * FROM command_grants WHERE guild_id=? ORDER BY user_id, command"),
+  addVoiceShield: connection.prepare(`
+    INSERT INTO voice_shields(guild_id, user_id, added_by, created_at) VALUES(?,?,?,?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET added_by=excluded.added_by, created_at=excluded.created_at
+  `),
+  removeVoiceShield: connection.prepare("DELETE FROM voice_shields WHERE guild_id=? AND user_id=?"),
+  hasVoiceShieldRow: connection.prepare("SELECT 1 FROM voice_shields WHERE guild_id=? AND user_id=?"),
+  listVoiceShields: connection.prepare("SELECT * FROM voice_shields WHERE guild_id=? ORDER BY created_at ASC"),
+  listCommandGrantsForUser: connection.prepare("SELECT * FROM command_grants WHERE guild_id=? AND user_id=? ORDER BY command"),
+  getBreakthruRole: connection.prepare("SELECT role_id FROM breakthru_roles WHERE guild_id=?"),
+  setBreakthruRole: connection.prepare(`
+    INSERT INTO breakthru_roles(guild_id, role_id) VALUES(?,?)
+    ON CONFLICT(guild_id) DO UPDATE SET role_id=excluded.role_id
+  `),
+  listBreakthruRoles: connection.prepare("SELECT guild_id, role_id FROM breakthru_roles"),
+  getPicRole: connection.prepare("SELECT role_id FROM pic_roles WHERE guild_id=?"),
+  setPicRole: connection.prepare(`
+    INSERT INTO pic_roles(guild_id, role_id) VALUES(?,?)
+    ON CONFLICT(guild_id) DO UPDATE SET role_id=excluded.role_id
+  `)
+};
+
+function saveGuard(guildId, userId, patch) {
+  const guild = key(guildId);
+  const user = key(userId);
+  statements.ensureGuard.run(guild, user);
+  const current = statements.getGuard.get(guild, user) || {};
+  statements.setGuardFlag.run(
+    patch.godmode == null ? current.godmode || 0 : patch.godmode ? 1 : 0,
+    patch.shield == null ? current.shield || 0 : patch.shield ? 1 : 0,
+    patch.stfu == null ? current.stfu || 0 : patch.stfu ? 1 : 0,
+    patch.lastChannelId === undefined ? current.last_channel_id || null : patch.lastChannelId,
+    guild,
+    user
+  );
+}
+
+module.exports = {
+  addManagement(guildId, userId, addedBy) {
+    return statements.addManagement.run(key(guildId), key(userId), key(addedBy), Date.now()).changes > 0;
+  },
+  removeManagement(guildId, userId) {
+    return statements.removeManagement.run(key(guildId), key(userId)).changes > 0;
+  },
+  isManagement(guildId, userId) {
+    return !!statements.isManagement.get(key(guildId), key(userId));
+  },
+  listManagement(guildId) {
+    return statements.listManagement.all(key(guildId));
+  },
+  addGodmode(guildId, userId, addedBy) {
+    statements.addGodmode.run(key(guildId), key(userId), key(addedBy), Date.now());
+  },
+  removeGodmode(guildId, userId) {
+    return statements.removeGodmode.run(key(guildId), key(userId)).changes > 0;
+  },
+  isGodmode(guildId, userId) {
+    return !!statements.isGodmode.get(key(guildId), key(userId));
+  },
+  getGodmode(guildId, userId) {
+    return statements.getGodmode.get(key(guildId), key(userId)) || null;
+  },
+  addAntinukeAdmin(guildId, userId, addedBy) {
+    return statements.addAntinuke.run(key(guildId), key(userId), key(addedBy), Date.now()).changes > 0;
+  },
+  removeAntinukeAdmin(guildId, userId) {
+    return statements.removeAntinuke.run(key(guildId), key(userId)).changes > 0;
+  },
+  isAntinukeAdmin(guildId, userId) {
+    return !!statements.isAntinuke.get(key(guildId), key(userId));
+  },
+  listAntinukeAdmins(guildId) {
+    return statements.listAntinuke.all(key(guildId));
+  },
+  setStaff(guildId, userId, tier, addedBy) {
+    statements.setStaff.run(key(guildId), key(userId), tier, addedBy == null ? null : String(addedBy), Date.now());
+  },
+  clearStaff(guildId, userId) {
+    return statements.clearStaff.run(key(guildId), key(userId)).changes > 0;
+  },
+  getStaff(guildId, userId) {
+    return statements.getStaff.get(key(guildId), key(userId)) || null;
+  },
+  listStaff(guildId, tier) {
+    return statements.listStaff.all(key(guildId), tier);
+  },
+  setRank(guildId, userId, rankKey, setBy) {
+    statements.setRank.run(key(guildId), key(userId), rankKey, key(setBy), Date.now());
+  },
+  clearRank(guildId, userId) {
+    return statements.clearRank.run(key(guildId), key(userId)).changes > 0;
+  },
+  getRank(guildId, userId) {
+    return statements.getRank.get(key(guildId), key(userId)) || null;
+  },
+  listRanks(guildId) {
+    return statements.listRanks.all(key(guildId));
+  },
+  setLog(guildId, category, channelId) {
+    statements.setLog.run(key(guildId), category, key(channelId));
+  },
+  removeLog(guildId, category) {
+    return statements.removeLog.run(key(guildId), category).changes > 0;
+  },
+  clearLogs(guildId) {
+    return statements.clearLogs.run(key(guildId)).changes;
+  },
+  getLog(guildId, category) {
+    return statements.getLog.get(key(guildId), category)?.channel_id || null;
+  },
+  listLogs(guildId) {
+    return statements.listLogs.all(key(guildId));
+  },
+  getAntinukePing(guildId) {
+    return statements.getPing.get(key(guildId))?.antinuke_ping_role_id || null;
+  },
+  setAntinukePing(guildId, roleId) {
+    statements.setPing.run(key(guildId), roleId ? key(roleId) : null);
+  },
+  getGuard(guildId, userId) {
+    return statements.getGuard.get(key(guildId), key(userId)) || null;
+  },
+  saveGuard,
+  listActiveGuards(guildId) {
+    return statements.listGuards.all(key(guildId));
+  },
+  setFollow(guildId, followerId, targetId) {
+    statements.setFollow.run(key(guildId), key(followerId), key(targetId));
+  },
+  clearFollow(guildId, followerId) {
+    return statements.clearFollow.run(key(guildId), key(followerId)).changes > 0;
+  },
+  followersOf(guildId, targetId) {
+    return statements.followsOf.all(key(guildId), key(targetId)).map((row) => row.follower_id);
+  },
+  followTarget(guildId, followerId) {
+    return statements.getFollow.get(key(guildId), key(followerId))?.target_id || null;
+  },
+  addHistory(guildId, userId, summary) {
+    const guild = key(guildId);
+    statements.addHistory.run(guild, key(userId), summary, Date.now());
+    statements.trimHistory.run(guild, guild);
+  },
+  listHistory(guildId, limit = 15) {
+    return statements.listHistory.all(key(guildId), limit);
+  },
+  listHistoryFor(guildId, userId, limit = 15) {
+    return statements.listHistoryFor.all(key(guildId), key(userId), limit);
+  },
+  addCallEvent(guildId, channelId, userId, action) {
+    const guild = key(guildId);
+    const channel = key(channelId);
+    statements.addCallEvent.run(guild, channel, key(userId), action, Date.now());
+    statements.trimCallHistory.run(guild, channel, guild, channel);
+  },
+  listCallHistory(guildId, channelId, limit = 400) {
+    return statements.listCallHistory.all(key(guildId), key(channelId), limit);
+  },
+  backfillCallHistory() {
+    if (statements.callHistoryExists.get()) return 0;
+    const rows = statements.savedVoiceHistory.all();
+    const insert = connection.transaction((entries) => {
+      let copied = 0;
+      for (const row of entries) {
+        const summary = String(row.summary || "");
+        const joined = summary.match(/^joined <#(\d{17,20})>$/);
+        if (joined) {
+          statements.addCallEvent.run(row.guild_id, joined[1], row.user_id, "join", row.created_at);
+          copied += 1;
+          continue;
+        }
+        const left = summary.match(/^left <#(\d{17,20})>$/);
+        if (left) {
+          statements.addCallEvent.run(row.guild_id, left[1], row.user_id, "leave", row.created_at);
+          copied += 1;
+          continue;
+        }
+        const moved = summary.match(/^moved <#(\d{17,20})> → <#(\d{17,20})>$/);
+        if (!moved) continue;
+        statements.addCallEvent.run(row.guild_id, moved[1], row.user_id, "leave", row.created_at);
+        statements.addCallEvent.run(row.guild_id, moved[2], row.user_id, "join", row.created_at);
+        copied += 1;
+      }
+      return copied;
+    });
+    return insert(rows);
+  },
+  addLockdown(guildId, channelId, kind) {
+    statements.addLockdown.run(key(guildId), key(channelId), kind);
+  },
+  listLockdown(guildId) {
+    return statements.listLockdown.all(key(guildId));
+  },
+  clearLockdown(guildId) {
+    statements.clearLockdown.run(key(guildId));
+  },
+  getVoiceRoles(guildId) {
+    return statements.getVoiceRoles.get(key(guildId)) || null;
+  },
+  setVoiceRole(guildId, rankKey, roleId) {
+    const guild = key(guildId);
+    statements.ensureVoiceRoles.run(guild);
+    const statement = rankKey === "premiumplus"
+      ? statements.setPremiumPlusRole
+      : rankKey === "premium"
+        ? statements.setPremiumRole
+        : statements.setPlusRole;
+    statement.run(key(roleId), guild);
+  },
+  voiceRoleIds(guildId) {
+    const row = statements.getVoiceRoles.get(key(guildId));
+    if (!row) return [];
+    return [row.plus_role_id, row.premium_role_id, row.premium_plus_role_id].filter(Boolean);
+  },
+  roleIdForRank(guildId, rankKey) {
+    const row = statements.getVoiceRoles.get(key(guildId));
+    if (!row || !rankKey) return null;
+    if (rankKey === "premiumplus") return row.premium_plus_role_id || null;
+    if (rankKey === "premium") return row.premium_role_id || null;
+    if (rankKey === "plus") return row.plus_role_id || null;
+    return null;
+  },
+  saveTextLock(guildId, channelId, state) {
+    statements.saveTextLock.run(key(guildId), key(channelId), state || "inherit");
+  },
+  getTextLock(guildId, channelId) {
+    return statements.getTextLock.get(key(guildId), key(channelId))?.send_messages || null;
+  },
+  listTextLocks(guildId) {
+    return statements.listTextLocks.all(key(guildId));
+  },
+  clearTextLock(guildId, channelId) {
+    statements.clearTextLock.run(key(guildId), key(channelId));
+  },
+  clearTextLocks(guildId) {
+    statements.clearTextLocks.run(key(guildId));
+  },
+  grantCommand(guildId, userId, command, grantedBy) {
+    statements.grantCommand.run(key(guildId), key(userId), command, key(grantedBy), Date.now());
+  },
+  revokeCommand(guildId, userId, command) {
+    return statements.revokeCommand.run(key(guildId), key(userId), command).changes > 0;
+  },
+  hasCommandGrant(guildId, userId, command) {
+    return !!statements.hasCommandGrant.get(key(guildId), key(userId), command);
+  },
+  addVoiceShield(guildId, userId, addedBy) {
+    statements.addVoiceShield.run(key(guildId), key(userId), addedBy == null ? null : key(addedBy), Date.now());
+  },
+  removeVoiceShield(guildId, userId) {
+    return statements.removeVoiceShield.run(key(guildId), key(userId)).changes > 0;
+  },
+  hasVoiceShieldRow(guildId, userId) {
+    return !!statements.hasVoiceShieldRow.get(key(guildId), key(userId));
+  },
+  listVoiceShields(guildId) {
+    return statements.listVoiceShields.all(key(guildId));
+  },
+  listCommandGrants(guildId) {
+    return statements.listCommandGrants.all(key(guildId));
+  },
+  listCommandGrantsForUser(guildId, userId) {
+    return statements.listCommandGrantsForUser.all(key(guildId), key(userId));
+  },
+  getBreakthruRole(guildId) {
+    return statements.getBreakthruRole.get(key(guildId))?.role_id || null;
+  },
+  setBreakthruRole(guildId, roleId) {
+    statements.setBreakthruRole.run(key(guildId), key(roleId));
+  },
+  listBreakthruRoles() {
+    return statements.listBreakthruRoles.all();
+  },
+  getPicRole(guildId) {
+    return statements.getPicRole.get(key(guildId))?.role_id || null;
+  },
+  setPicRole(guildId, roleId) {
+    statements.setPicRole.run(key(guildId), key(roleId));
+  }
+};
+
+module.exports.backfillCallHistory();
