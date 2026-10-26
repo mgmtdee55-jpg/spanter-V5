@@ -13,6 +13,7 @@ const quickStats = require("./quick-stats");
 const auditlog = require("./auditlog");
 const { resolveUserId } = require("./vouch/resolve");
 const { embed } = require("./vouch/ui");
+const updates = require("./updates");
 
 function commandName(args, prefix) {
   const head = String(args[0] || "").toLowerCase();
@@ -76,6 +77,7 @@ async function handleCommand(message, args, prefix) {
     await message.reply(catalog.newCommandsMessage(prefix, message.member));
     return true;
   }
+  if (await updates.handleCommand(message, args, prefix)) return true;
   if (name === "snipe" || name === "s" || name === "clearsnipe" || name === "cs") {
     await snipe.handleCommand(message, name);
     return true;

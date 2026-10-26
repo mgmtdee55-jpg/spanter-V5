@@ -65,6 +65,7 @@ client.once("clientReady", async () => {
     proof.prime(client).catch((error) => console.error("[proof]", error));
     await vouch.reconcileAll(client);
     stats.reconcile(client);
+    require("./updates").refresh(client).catch((error) => console.error("[update]", error));
     for (const guild of client.guilds.cache.values()) {
       try {
         await reconcileGuild(guild);

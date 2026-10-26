@@ -428,6 +428,12 @@ const SPECS = {
     syntax: "unshield (user)",
     example: "unshield kutt"
   },
+  update: {
+    name: "update",
+    description: "Show this bot's version and whether a newer GitHub release is available.",
+    syntax: "update",
+    example: "update"
+  },
   inspect: {
     name: "inspect",
     description: "Show a member's voice status.",
