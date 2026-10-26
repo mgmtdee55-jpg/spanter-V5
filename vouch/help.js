@@ -120,6 +120,7 @@ function botText(prefix) {
     `\`${p}help\` / \`${p}bothelp\` — category menu`,
     `\`${p}showallcommands\` — every command, grouped`,
     `\`${p}newcommands\` — what was just added`,
+    `\`${p}update\` — GitHub release vs this bot`,
     `\`${p}snipe\` / \`${p}s\` — deleted messages in this channel from the last 2 hours`,
     `\`${p}clearsnipe\` / \`${p}cs\` — clear that snipe history`,
     `\`${p}modstats [@user]\` — warns, kicks, bans, and mutes they issued`,
